@@ -187,4 +187,78 @@ export class MCPProxy {
   getServer() {
     return this.server
   }
+
+  // Expose handlers for HTTP-to-MCP bridge
+  async handleMCPRequest(method: string, params: any): Promise<any> {
+    if (method === 'tools/list') {
+      const tools: Tool[] = []
+      console.log(`[HTTP→MCP] tools/list requested - ${Object.keys(this.tools).length} tool groups found`)
+      
+      Object.entries(this.tools).forEach(([toolName, def]) => {
+        def.methods.forEach(method => {
+          const toolNameWithMethod = `${toolName}-${method.name}`;
+          const truncatedToolName = this.truncateToolName(toolNameWithMethod);
+          tools.push({
+            name: truncatedToolName,
+            description: method.description,
+            inputSchema: method.inputSchema as Tool['inputSchema'],
+          })
+        })
+      })
+      
+      console.log(`[HTTP→MCP] Returning ${tools.length} tools to client`)
+      return { tools }
+    } else if (method === 'tools/call') {
+      const { name, arguments: args } = params
+      console.log(`[HTTP→MCP] tools/call requested: ${name}`)
+      
+      const operation = this.findOperation(name)
+      if (!operation) {
+        throw new Error(`Method ${name} not found`)
+      }
+      
+      try {
+        const response = await this.httpClient.executeOperation(operation, args)
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response.data),
+            },
+          ],
+        }
+      } catch (error) {
+        console.error('[HTTP→MCP] Error in tool call', error)
+        if (error instanceof HttpClientError) {
+          console.error('HttpClientError encountered, returning structured error', error)
+          const data = error.data?.response?.data ?? error.data ?? {}
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  status: 'error',
+                  ...(typeof data === 'object' ? data : { data: data }),
+                }),
+              },
+            ],
+          }
+        }
+        throw error
+      }
+    } else if (method === 'initialize') {
+      console.log('[HTTP→MCP] initialize requested')
+      return {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {}
+        },
+        serverInfo: {
+          name: 'Notion API',
+          version: '1.9.0'
+        }
+      }
+    }
+    throw new Error(`Unknown method: ${method}`)
+  }
 }

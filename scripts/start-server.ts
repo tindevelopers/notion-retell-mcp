@@ -78,14 +78,15 @@ Examples:
     await proxy.connect(new StdioServerTransport())
     return proxy.getServer()
   } else if (transport === 'hybrid') {
-    // Hybrid mode: stdio transport for MCP clients + HTTP health endpoint for monitoring
+    // Hybrid mode: stdio transport for MCP clients + HTTP endpoints for Retell AI HTTPS requests
     const proxy = await initProxy(specPath, baseUrl)
+    const mcpServer = proxy.getServer()
     
-    // Connect to stdio transport (for Retell AI and other MCP clients)
+    // Connect to stdio transport (for native MCP clients)
     await proxy.connect(new StdioServerTransport())
-    console.log('✅ STDIO transport connected (ready for MCP clients like Retell AI)')
+    console.log('✅ STDIO transport connected (ready for MCP clients)')
     
-    // Start HTTP server for health checks only
+    // Start HTTP server for health checks and HTTP-to-MCP bridge
     const app = express()
     app.use(express.json())
     
@@ -103,54 +104,125 @@ Examples:
         timestamp: new Date().toISOString(),
         transport: 'hybrid',
         stdio: 'active',
-        http: 'health-only',
+        http: 'mcp-bridge',
         port: options.port
       })
     })
     
-    // Optional: Add a simple info endpoint
+    // Info endpoint
     app.get('/', (req, res) => {
       res.status(200).json({
         service: 'Notion MCP Server',
         transport: 'hybrid',
         stdio: 'active',
+        http: 'mcp-bridge',
         endpoints: {
-          health: '/health'
-        },
-        note: 'MCP tools are accessed via STDIO transport, not HTTP endpoints'
-      })
-    })
-    
-    // Handle incorrect HTTP requests to MCP endpoints
-    app.get('/tools/list', (req, res) => {
-      res.status(400).json({
-        error: 'MCP tools/list is not available via HTTP',
-        message: 'This server uses STDIO transport for MCP protocol communication',
-        instructions: {
-          transport: 'STDIO',
-          protocol: 'MCP (Model Context Protocol)',
-          connection: 'Connect via STDIO transport, not HTTP',
-          forRetellAI: 'Configure Retell AI to use STDIO transport with command: node bin/cli.mjs --transport hybrid'
-        },
-        availableEndpoints: {
           health: '/health',
-          info: '/'
+          toolsList: 'POST /tools/list',
+          initialize: 'POST /initialize',
+          toolsCall: 'POST /tools/call'
         }
       })
     })
     
-    // Catch-all for other MCP endpoints
-    app.use((req, res) => {
-      if (req.path.startsWith('/tools/') || req.path.startsWith('/mcp/')) {
-        res.status(400).json({
-          error: 'MCP protocol endpoints are not available via HTTP',
-          message: 'Use STDIO transport for MCP protocol communication',
-          requestedPath: req.path
+    // HTTP-to-MCP Bridge: Handle HTTP requests and convert to MCP protocol
+    // This allows Retell AI to connect via HTTPS while we use STDIO internally
+    
+    // POST /tools/list - List available tools
+    app.post('/tools/list', async (req, res) => {
+      try {
+        console.log('[HTTP→MCP] Received POST /tools/list request')
+        const params = req.body.params || {}
+        const result = await proxy.handleMCPRequest('tools/list', params)
+        res.json({
+          jsonrpc: '2.0',
+          result,
+          id: req.body.id || Date.now()
         })
-      } else {
-        res.status(404).json({
-          error: 'Not Found',
-          availableEndpoints: ['/health', '/']
+      } catch (error) {
+        console.error('[HTTP→MCP] Error handling tools/list:', error)
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: (error as Error).message
+          },
+          id: req.body.id || null
+        })
+      }
+    })
+    
+    // GET /tools/list - For Retell AI compatibility (convert GET to POST)
+    app.get('/tools/list', async (req, res) => {
+      try {
+        console.log('[HTTP→MCP] Received GET /tools/list, converting to MCP request')
+        const result = await proxy.handleMCPRequest('tools/list', {})
+        res.json({
+          jsonrpc: '2.0',
+          result,
+          id: Date.now()
+        })
+      } catch (error) {
+        console.error('[HTTP→MCP] Error handling GET /tools/list:', error)
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: (error as Error).message
+          },
+          id: null
+        })
+      }
+    })
+    
+    // POST /initialize - Initialize MCP connection
+    app.post('/initialize', async (req, res) => {
+      try {
+        console.log('[HTTP→MCP] Received POST /initialize request')
+        const params = req.body.params || {}
+        const result = await proxy.handleMCPRequest('initialize', params)
+        res.json({
+          jsonrpc: '2.0',
+          result,
+          id: req.body.id || Date.now()
+        })
+      } catch (error) {
+        console.error('[HTTP→MCP] Error handling initialize:', error)
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: (error as Error).message
+          },
+          id: req.body.id || null
+        })
+      }
+    })
+    
+    // POST /tools/call - Call a tool
+    app.post('/tools/call', async (req, res) => {
+      try {
+        console.log('[HTTP→MCP] Received POST /tools/call request')
+        const params = req.body.params || {}
+        const result = await proxy.handleMCPRequest('tools/call', params)
+        res.json({
+          jsonrpc: '2.0',
+          result,
+          id: req.body.id || Date.now()
+        })
+      } catch (error) {
+        console.error('[HTTP→MCP] Error handling tools/call:', error)
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: (error as Error).message
+          },
+          id: req.body.id || null
         })
       }
     })
