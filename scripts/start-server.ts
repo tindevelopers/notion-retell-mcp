@@ -127,25 +127,6 @@ Examples:
       mcpReady = false
     })
     
-    // Info endpoint
-    app.get('/', (req, res) => {
-      res.status(200).json({
-        service: 'Notion MCP Server',
-        transport: 'hybrid',
-        stdio: 'active',
-        http: 'mcp-bridge',
-        endpoints: {
-          health: '/health',
-          toolsList: 'POST /tools/list',
-          initialize: 'POST /initialize',
-          toolsCall: 'POST /tools/call'
-        }
-      })
-    })
-    
-    // HTTP-to-MCP Bridge: Handle HTTP requests and convert to MCP protocol
-    // This allows Retell AI to connect via HTTPS while we use STDIO internally
-    
     // Helper function to check if MCP proxy is ready
     const checkMCPReady = (req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (!mcpReady || !proxy) {
@@ -162,103 +143,206 @@ Examples:
       next()
     }
     
-    // POST /tools/list - List available tools
-    app.post('/tools/list', checkMCPReady, async (req, res) => {
-      try {
-        console.log('[HTTP→MCP] Received POST /tools/list request')
-        const params = req.body.params || {}
-        const result = await proxy.handleMCPRequest('tools/list', params)
-        res.json({
-          jsonrpc: '2.0',
-          result,
-          id: req.body.id || Date.now()
-        })
-      } catch (error) {
-        console.error('[HTTP→MCP] Error handling tools/list:', error)
-        res.status(500).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32603,
-            message: 'Internal error',
-            data: (error as Error).message
-          },
-          id: req.body.id || null
-        })
-      }
+    // Root endpoint - GET for info, POST for tools (Retell AI format)
+    app.get('/', (req, res) => {
+      res.status(200).json({
+        name: 'Notion MCP Server',
+        version: '1.9.0',
+        status: 'running',
+        mode: 'hybrid',
+        description: 'HTTP endpoints for Railway health checks + MCP server ready for stdio',
+        endpoints: {
+          '/health': 'Health check endpoint',
+          '/capabilities': 'Get MCP server capabilities (tools, resources, prompts)',
+          '/': 'This endpoint (GET for info, POST for tools or JSON-RPC 2.0 MCP protocol)',
+          '/mcp': 'MCP protocol endpoint (JSON-RPC 2.0)',
+          '/tools': 'Tools endpoint (JSON-RPC 2.0 or simple JSON)'
+        },
+        mcp_protocol: {
+          stdio: 'Available - MCP clients can connect via stdin/stdout',
+          note: 'For stdio usage, invoke directly: node bin/cli.mjs --transport stdio'
+        }
+      })
     })
     
-    // GET /tools/list - For Retell AI compatibility (convert GET to POST)
-    app.get('/tools/list', checkMCPReady, async (req, res) => {
+    // POST / - Returns tools list for Retell AI (simple JSON format)
+    app.post('/', checkMCPReady, async (req, res) => {
       try {
-        console.log('[HTTP→MCP] Received GET /tools/list, converting to MCP request')
+        console.log('[HTTP→MCP] Received POST / request')
+        const body = req.body
+        
+        // Check if this is a JSON-RPC 2.0 request
+        if (body.jsonrpc === '2.0') {
+          // Redirect to tools endpoint for JSON-RPC handling
+          await handleToolsEndpoint(req, res)
+          return
+        }
+        
+        // Simple JSON format - return tools list
         const result = await proxy.handleMCPRequest('tools/list', {})
-        res.json({
-          jsonrpc: '2.0',
-          result,
-          id: Date.now()
-        })
+        const toolsList = result.tools.map((tool: any) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema?.properties || {}
+        }))
+        
+        res.json({ tools: toolsList })
       } catch (error) {
-        console.error('[HTTP→MCP] Error handling GET /tools/list:', error)
+        console.error('[HTTP→MCP] Error handling POST /:', error)
         res.status(500).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32603,
-            message: 'Internal error',
-            data: (error as Error).message
-          },
-          id: null
+          error: (error as Error).message
         })
       }
     })
     
-    // POST /initialize - Initialize MCP connection
-    app.post('/initialize', checkMCPReady, async (req, res) => {
+    // GET /capabilities - Get MCP server capabilities
+    app.get('/capabilities', checkMCPReady, async (req, res) => {
       try {
-        console.log('[HTTP→MCP] Received POST /initialize request')
-        const params = req.body.params || {}
-        const result = await proxy.handleMCPRequest('initialize', params)
+        console.log('[HTTP→MCP] Received GET /capabilities request')
+        const toolsResult = await proxy.handleMCPRequest('tools/list', {})
+        const initResult = await proxy.handleMCPRequest('initialize', {})
+        
         res.json({
-          jsonrpc: '2.0',
-          result,
-          id: req.body.id || Date.now()
+          server: initResult.serverInfo || {
+            name: 'Notion API',
+            version: '1.9.0'
+          },
+          tools: toolsResult.tools || [],
+          resources: [],
+          prompts: []
         })
       } catch (error) {
-        console.error('[HTTP→MCP] Error handling initialize:', error)
+        console.error('[HTTP→MCP] Error handling capabilities:', error)
         res.status(500).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32603,
-            message: 'Internal error',
-            data: (error as Error).message
-          },
-          id: req.body.id || null
+          error: (error as Error).message
         })
       }
     })
     
-    // POST /tools/call - Call a tool
-    app.post('/tools/call', checkMCPReady, async (req, res) => {
+    // Tools endpoint handler (shared by /tools and /mcp)
+    async function handleToolsEndpoint(req: express.Request, res: express.Response): Promise<void> {
       try {
-        console.log('[HTTP→MCP] Received POST /tools/call request')
-        const params = req.body.params || {}
-        const result = await proxy.handleMCPRequest('tools/call', params)
-        res.json({
-          jsonrpc: '2.0',
-          result,
-          id: req.body.id || Date.now()
-        })
+        const body = req.body
+        
+        // Handle JSON-RPC 2.0 MCP protocol requests
+        if (body.jsonrpc === '2.0') {
+          const method = body.method || ''
+          const requestId = body.id
+          
+          if (method === 'initialize') {
+            console.log('[HTTP→MCP] Received initialize request')
+            const result = await proxy.handleMCPRequest('initialize', body.params || {})
+            res.json({
+              jsonrpc: '2.0',
+              id: requestId,
+              result: {
+                protocolVersion: '2024-11-05',
+                capabilities: {
+                  tools: {}
+                },
+                serverInfo: result.serverInfo || {
+                  name: 'Notion API',
+                  version: '1.9.0'
+                }
+              }
+            })
+            return
+          } else if (method === 'tools/list') {
+            console.log('[HTTP→MCP] Received tools/list request')
+            const result = await proxy.handleMCPRequest('tools/list', body.params || {})
+            
+            // Format tools for MCP protocol (use inputSchema directly)
+            const toolsList = result.tools.map((tool: any) => ({
+              name: tool.name,
+              description: tool.description || '',
+              inputSchema: tool.inputSchema || {
+                type: 'object',
+                properties: {}
+              }
+            }))
+            
+            res.json({
+              jsonrpc: '2.0',
+              id: requestId,
+              result: {
+                tools: toolsList
+              }
+            })
+            return
+          } else if (method === 'tools/call') {
+            console.log('[HTTP→MCP] Received tools/call request')
+            const params = body.params || {}
+            const result = await proxy.handleMCPRequest('tools/call', params)
+            
+            res.json({
+              jsonrpc: '2.0',
+              id: requestId,
+              result: result
+            })
+            return
+          } else {
+            // Unknown method
+            res.json({
+              jsonrpc: '2.0',
+              id: requestId,
+              error: {
+                code: -32601,
+                message: `Method not found: ${method}`
+              }
+            })
+            return
+          }
+        }
+        
+        // Fallback: Simple JSON format - return tools list
+        const result = await proxy.handleMCPRequest('tools/list', {})
+        const toolsList = result.tools.map((tool: any) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema?.properties || {}
+        }))
+        
+        res.json({ tools: toolsList })
       } catch (error) {
-        console.error('[HTTP→MCP] Error handling tools/call:', error)
+        console.error('[HTTP→MCP] Error handling tools endpoint:', error)
+        const requestId = req.body?.id || null
         res.status(500).json({
           jsonrpc: '2.0',
+          id: requestId,
           error: {
             code: -32603,
             message: 'Internal error',
             data: (error as Error).message
-          },
-          id: req.body.id || null
+          }
         })
       }
+    }
+    
+    // POST /tools - Tools endpoint for Retell AI (JSON-RPC 2.0 or simple JSON)
+    app.post('/tools', checkMCPReady, async (req, res) => {
+      await handleToolsEndpoint(req, res)
+    })
+    
+    // GET /tools - Get tools list (simple JSON)
+    app.get('/tools', checkMCPReady, async (req, res) => {
+      try {
+        console.log('[HTTP→MCP] Received GET /tools request')
+        const result = await proxy.handleMCPRequest('tools/list', {})
+        const toolsList = result.tools.map((tool: any) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema?.properties || {}
+        }))
+        res.json({ tools: toolsList })
+      } catch (error) {
+        console.error('[HTTP→MCP] Error handling GET /tools:', error)
+        res.status(500).json({ error: (error as Error).message })
+      }
+    })
+    
+    // POST /mcp - MCP protocol endpoint (JSON-RPC 2.0)
+    app.post('/mcp', checkMCPReady, async (req, res) => {
+      await handleToolsEndpoint(req, res)
     })
     
     // Return a dummy server object (HTTP server runs in foreground)
