@@ -1,3 +1,61 @@
+# Dependencies
 node_modules
-Dockerfile
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+build
+dist
+*.tsbuildinfo
+
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test files
+test-*.js
+test-*.ts
+*.test.ts
+*.test.js
+__tests__
+
+# Scripts (keep only necessary ones)
+scripts/*.sh
+scripts/test-*.js
+scripts/test-*.ts
+scripts/monitor-*.sh
+scripts/deploy-*.sh
+scripts/setup-*.sh
+scripts/check-*.sh
+
+# Railway specific
+.railwayignore
+railway.toml
+nixpacks.toml
+
+# Other
 docker-compose.yml
+smithery.yaml
