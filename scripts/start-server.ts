@@ -116,8 +116,43 @@ Examples:
         stdio: 'active',
         endpoints: {
           health: '/health'
+        },
+        note: 'MCP tools are accessed via STDIO transport, not HTTP endpoints'
+      })
+    })
+    
+    // Handle incorrect HTTP requests to MCP endpoints
+    app.get('/tools/list', (req, res) => {
+      res.status(400).json({
+        error: 'MCP tools/list is not available via HTTP',
+        message: 'This server uses STDIO transport for MCP protocol communication',
+        instructions: {
+          transport: 'STDIO',
+          protocol: 'MCP (Model Context Protocol)',
+          connection: 'Connect via STDIO transport, not HTTP',
+          forRetellAI: 'Configure Retell AI to use STDIO transport with command: node bin/cli.mjs --transport hybrid'
+        },
+        availableEndpoints: {
+          health: '/health',
+          info: '/'
         }
       })
+    })
+    
+    // Catch-all for other MCP endpoints
+    app.use((req, res) => {
+      if (req.path.startsWith('/tools/') || req.path.startsWith('/mcp/')) {
+        res.status(400).json({
+          error: 'MCP protocol endpoints are not available via HTTP',
+          message: 'Use STDIO transport for MCP protocol communication',
+          requestedPath: req.path
+        })
+      } else {
+        res.status(404).json({
+          error: 'Not Found',
+          availableEndpoints: ['/health', '/']
+        })
+      }
     })
     
     const port = options.port
