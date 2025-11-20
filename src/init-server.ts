@@ -44,7 +44,9 @@ async function loadOpenApiSpec(specPath: string, baseUrl: string | undefined): P
 
 export async function initProxy(specPath: string, baseUrl: string |undefined) {
   const openApiSpec = await loadOpenApiSpec(specPath, baseUrl)
+  console.log(`[MCP] Initializing proxy with OpenAPI spec: ${openApiSpec.info?.title || 'Unknown'}`)
   const proxy = new MCPProxy('Notion API', openApiSpec)
+  console.log(`[MCP] Proxy initialized successfully`)
 
   return proxy
 }

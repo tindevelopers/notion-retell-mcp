@@ -58,6 +58,8 @@ export class MCPProxy {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const tools: Tool[] = []
 
+      console.log(`[MCP] tools/list requested - ${Object.keys(this.tools).length} tool groups found`)
+
       // Add methods as separate tools to match the MCP format
       Object.entries(this.tools).forEach(([toolName, def]) => {
         def.methods.forEach(method => {
@@ -71,6 +73,7 @@ export class MCPProxy {
         })
       })
 
+      console.log(`[MCP] Returning ${tools.length} tools to client`)
       return { tools }
     })
 
@@ -175,7 +178,10 @@ export class MCPProxy {
 
   async connect(transport: Transport) {
     // The SDK will handle stdio communication
+    console.log(`[MCP] Connecting to transport...`)
     await this.server.connect(transport)
+    console.log(`[MCP] Transport connected successfully`)
+    console.log(`[MCP] Tools registered: ${Object.keys(this.tools).length} tool groups`)
   }
 
   getServer() {
