@@ -306,6 +306,16 @@ Add a page titled "Notion MCP" to page "Development"
 Get the content of page 1a6b35e6e67f802fa7e1d27686f017f2
 ```
 
+### Retell AI Integration
+
+This server is configured for Retell AI integration with Railway deployment. See [RETELL_INTEGRATION.md](./RETELL_INTEGRATION.md) for detailed setup instructions.
+
+**Quick Start:**
+1. Deploy to Railway (see [RAILWAY.md](./RAILWAY.md))
+2. Configure Retell AI to use STDIO transport
+3. Set `NOTION_TOKEN` environment variable
+4. Server runs in hybrid mode (STDIO + HTTP health endpoint)
+
 ### Development
 
 Build

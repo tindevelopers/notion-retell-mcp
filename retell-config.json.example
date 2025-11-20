@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "notion": {
+      "name": "Notion MCP Server",
+      "description": "Access Notion API tools via MCP",
+      "command": "node",
+      "args": ["bin/cli.mjs", "--transport", "hybrid"],
+      "env": {
+        "NOTION_TOKEN": "ntn_your_notion_token_here"
+      },
+      "transport": "stdio"
+    }
+  }
+}
+

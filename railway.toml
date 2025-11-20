@@ -1,0 +1,18 @@
+# Railway configuration file
+# This file configures how Railway builds and deploys your service
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Environment variables are set in Railway dashboard
+# Required: NOTION_TOKEN
+# Optional: PORT (set automatically by Railway)
+
