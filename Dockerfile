@@ -11,16 +11,16 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN --mount=type=cache,id=npm-cache,target=/root/.npm npm ci --ignore-scripts --omit-dev
+RUN npm ci --ignore-scripts --omit-dev
 
 # Copy source code
 COPY . .
 
 # Build the package
-RUN --mount=type=cache,id=npm-cache,target=/root/.npm npm run build
+RUN npm run build
 
 # Install package globally
-RUN --mount=type=cache,id=npm-cache,target=/root/.npm npm link
+RUN npm link
 
 # Minimal image for runtime
 FROM node:20-slim
