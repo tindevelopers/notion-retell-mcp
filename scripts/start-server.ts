@@ -89,6 +89,13 @@ Examples:
     const app = express()
     app.use(express.json())
     
+    // Log all requests for monitoring
+    app.use((req, res, next) => {
+      const timestamp = new Date().toISOString()
+      console.log(`[${timestamp}] ${req.method} ${req.path} - ${req.ip || 'unknown'}`)
+      next()
+    })
+    
     // Health endpoint (no authentication required)
     app.get('/health', (req, res) => {
       res.status(200).json({
