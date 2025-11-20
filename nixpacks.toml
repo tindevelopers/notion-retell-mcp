@@ -5,11 +5,15 @@
 nixPkgs = ["nodejs-20_x"]
 
 [phases.install]
-cmds = ["npm ci --ignore-scripts --omit-dev"]
+cmds = [
+  "cd /app && npm ci --ignore-scripts --omit-dev"
+]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = [
+  "cd /app && npm run build"
+]
 
 [start]
-cmd = "npm start"
+cmd = "cd /app && npm start"
 
