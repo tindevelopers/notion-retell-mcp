@@ -79,14 +79,8 @@ Examples:
     return proxy.getServer()
   } else if (transport === 'hybrid') {
     // Hybrid mode: stdio transport for MCP clients + HTTP endpoints for Retell AI HTTPS requests
-    const proxy = await initProxy(specPath, baseUrl)
-    const mcpServer = proxy.getServer()
+    // Start HTTP server FIRST for Railway healthcheck, then initialize MCP proxy in background
     
-    // Connect to stdio transport (for native MCP clients)
-    await proxy.connect(new StdioServerTransport())
-    console.log('✅ STDIO transport connected (ready for MCP clients)')
-    
-    // Start HTTP server for health checks and HTTP-to-MCP bridge
     const app = express()
     app.use(express.json())
     
@@ -97,16 +91,40 @@ Examples:
       next()
     })
     
-    // Health endpoint (no authentication required)
+    // Health endpoint (no authentication required) - respond immediately for Railway healthcheck
+    let mcpReady = false
     app.get('/health', (req, res) => {
       res.status(200).json({
-        status: 'healthy',
+        status: mcpReady ? 'healthy' : 'starting',
         timestamp: new Date().toISOString(),
         transport: 'hybrid',
-        stdio: 'active',
+        stdio: mcpReady ? 'active' : 'initializing',
         http: 'mcp-bridge',
         port: options.port
       })
+    })
+    
+    // Start HTTP server immediately (before MCP initialization)
+    const port = options.port
+    const server = app.listen(port, '0.0.0.0', () => {
+      console.log(`✅ HTTP server listening on port ${port}`)
+      console.log(`   Health check: http://0.0.0.0:${port}/health`)
+    })
+    
+    // Initialize MCP proxy in background (after HTTP server is listening)
+    let proxy: Awaited<ReturnType<typeof initProxy>>
+    initProxy(specPath, baseUrl).then(async (initializedProxy) => {
+      proxy = initializedProxy
+      const mcpServer = proxy.getServer()
+      
+      // Connect to stdio transport (for native MCP clients)
+      await proxy.connect(new StdioServerTransport())
+      console.log('✅ STDIO transport connected (ready for MCP clients)')
+      mcpReady = true
+      console.log('✅ MCP proxy fully initialized and ready')
+    }).catch((error) => {
+      console.error('❌ Failed to initialize MCP proxy:', error)
+      mcpReady = false
     })
     
     // Info endpoint
@@ -128,8 +146,24 @@ Examples:
     // HTTP-to-MCP Bridge: Handle HTTP requests and convert to MCP protocol
     // This allows Retell AI to connect via HTTPS while we use STDIO internally
     
+    // Helper function to check if MCP proxy is ready
+    const checkMCPReady = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (!mcpReady || !proxy) {
+        res.status(503).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Service temporarily unavailable: MCP proxy is still initializing',
+          },
+          id: req.body?.id || null
+        })
+        return
+      }
+      next()
+    }
+    
     // POST /tools/list - List available tools
-    app.post('/tools/list', async (req, res) => {
+    app.post('/tools/list', checkMCPReady, async (req, res) => {
       try {
         console.log('[HTTP→MCP] Received POST /tools/list request')
         const params = req.body.params || {}
@@ -154,7 +188,7 @@ Examples:
     })
     
     // GET /tools/list - For Retell AI compatibility (convert GET to POST)
-    app.get('/tools/list', async (req, res) => {
+    app.get('/tools/list', checkMCPReady, async (req, res) => {
       try {
         console.log('[HTTP→MCP] Received GET /tools/list, converting to MCP request')
         const result = await proxy.handleMCPRequest('tools/list', {})
@@ -178,7 +212,7 @@ Examples:
     })
     
     // POST /initialize - Initialize MCP connection
-    app.post('/initialize', async (req, res) => {
+    app.post('/initialize', checkMCPReady, async (req, res) => {
       try {
         console.log('[HTTP→MCP] Received POST /initialize request')
         const params = req.body.params || {}
@@ -203,7 +237,7 @@ Examples:
     })
     
     // POST /tools/call - Call a tool
-    app.post('/tools/call', async (req, res) => {
+    app.post('/tools/call', checkMCPReady, async (req, res) => {
       try {
         console.log('[HTTP→MCP] Received POST /tools/call request')
         const params = req.body.params || {}
@@ -227,15 +261,8 @@ Examples:
       }
     })
     
-    const port = options.port
-    app.listen(port, '0.0.0.0', () => {
-      console.log(`✅ HTTP health endpoint listening on port ${port}`)
-      console.log(`   Health check: http://0.0.0.0:${port}/health`)
-      console.log(`   MCP communication: STDIO (for Retell AI)`)
-    })
-    
-    // Return the stdio server (HTTP server runs in background)
-    return proxy.getServer()
+    // Return a dummy server object (HTTP server runs in foreground)
+    return { close: () => server.close() }
   } else if (transport === 'http') {
     // Use Streamable HTTP transport
     const app = express()
