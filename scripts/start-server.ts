@@ -19,7 +19,8 @@ export async function startServer(args: string[] = process.argv) {
   function parseArgs() {
     const args = process.argv.slice(2);
     let transport = 'stdio'; // default
-    let port = 3000;
+    // Use PORT environment variable (Railway, Heroku, etc.) or default to 3000
+    let port = parseInt(process.env.PORT || '3000', 10);
     let authToken: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
@@ -37,8 +38,11 @@ export async function startServer(args: string[] = process.argv) {
 Usage: notion-mcp-server [options]
 
 Options:
-  --transport <type>     Transport type: 'stdio' or 'http' (default: stdio)
-  --port <number>        Port for HTTP server when using Streamable HTTP transport (default: 3000)
+  --transport <type>     Transport type: 'stdio', 'http', or 'hybrid' (default: stdio)
+                         - stdio: STDIO transport only (for MCP clients like Retell AI)
+                         - http: Streamable HTTP transport only
+                         - hybrid: STDIO transport + HTTP health endpoint (for Railway)
+  --port <number>        Port for HTTP server when using HTTP or hybrid transport (default: 3000)
   --auth-token <token>   Bearer token for HTTP transport authentication (optional)
   --help, -h             Show this help message
 
@@ -46,10 +50,12 @@ Environment Variables:
   NOTION_TOKEN           Notion integration token (recommended)
   OPENAPI_MCP_HEADERS    JSON string with Notion API headers (alternative)
   AUTH_TOKEN             Bearer token for HTTP transport authentication (alternative to --auth-token)
+  PORT                   Port for HTTP server (default: 3000, Railway sets this automatically)
 
 Examples:
   notion-mcp-server                                    # Use stdio transport (default)
   notion-mcp-server --transport stdio                  # Use stdio transport explicitly
+  notion-mcp-server --transport hybrid                 # Use hybrid mode: stdio + HTTP health endpoint
   notion-mcp-server --transport http                   # Use Streamable HTTP transport on port 3000
   notion-mcp-server --transport http --port 8080       # Use Streamable HTTP transport on port 8080
   notion-mcp-server --transport http --auth-token mytoken # Use Streamable HTTP transport with custom auth token
@@ -70,6 +76,51 @@ Examples:
     // Use stdio transport (default)
     const proxy = await initProxy(specPath, baseUrl)
     await proxy.connect(new StdioServerTransport())
+    return proxy.getServer()
+  } else if (transport === 'hybrid') {
+    // Hybrid mode: stdio transport for MCP clients + HTTP health endpoint for monitoring
+    const proxy = await initProxy(specPath, baseUrl)
+    
+    // Connect to stdio transport (for Retell AI and other MCP clients)
+    await proxy.connect(new StdioServerTransport())
+    console.log('✅ STDIO transport connected (ready for MCP clients like Retell AI)')
+    
+    // Start HTTP server for health checks only
+    const app = express()
+    app.use(express.json())
+    
+    // Health endpoint (no authentication required)
+    app.get('/health', (req, res) => {
+      res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        transport: 'hybrid',
+        stdio: 'active',
+        http: 'health-only',
+        port: options.port
+      })
+    })
+    
+    // Optional: Add a simple info endpoint
+    app.get('/', (req, res) => {
+      res.status(200).json({
+        service: 'Notion MCP Server',
+        transport: 'hybrid',
+        stdio: 'active',
+        endpoints: {
+          health: '/health'
+        }
+      })
+    })
+    
+    const port = options.port
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`✅ HTTP health endpoint listening on port ${port}`)
+      console.log(`   Health check: http://0.0.0.0:${port}/health`)
+      console.log(`   MCP communication: STDIO (for Retell AI)`)
+    })
+    
+    // Return the stdio server (HTTP server runs in background)
     return proxy.getServer()
   } else if (transport === 'http') {
     // Use Streamable HTTP transport
@@ -228,7 +279,7 @@ Examples:
     // Return a dummy server for compatibility
     return { close: () => {} }
   } else {
-    throw new Error(`Unsupported transport: ${transport}. Use 'stdio' or 'http'.`)
+    throw new Error(`Unsupported transport: ${transport}. Use 'stdio', 'http', or 'hybrid'.`)
   }
 }
 

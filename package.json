@@ -11,7 +11,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -build && node scripts/build-cli.js",
-    "dev": "tsx watch scripts/start-server.ts"
+    "dev": "tsx watch scripts/start-server.ts",
+    "start": "node bin/cli.mjs --transport hybrid"
   },
   "bin": {
     "notion-mcp-server": "bin/cli.mjs"
